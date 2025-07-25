@@ -23,14 +23,12 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        /* Style for the map iframe for a seamless look */
         #mapContainer iframe {
             border-radius: 0.5rem;
             border: 1px solid #d4d4d8; /* Zinc 300 */
             width: 100%;
             height: 100%;
         }
-        /* Make the error message pre-formatted to respect newlines */
         #statusContainer {
             white-space: pre-wrap;
             text-align: left;
@@ -52,11 +50,19 @@
                 <div class="space-y-6">
                     <div>
                         <label for="apiUrl" class="block text-sm font-semibold text-gray-800 mb-1">1. Colab Backend URL</label>
-                        <input type="text" id="apiUrl" class="block w-full px-4 py-2 bg-zinc-100 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="Paste your new URL here">
+                        <input type="text" id="apiUrl" class="block w-full px-4 py-2 bg-zinc-100 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="Paste your tunnel URL here">
                     </div>
                     <div>
-                        <label for="locationInput" class="block text-sm font-semibold text-gray-800 mb-1">2. Your Location in Bangalore</label>
-                        <input type="text" id="locationInput" class="block w-full px-4 py-2 bg-zinc-100 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="e.g., Jayanagar or RV College">
+                        <label for="locationInput" class="block text-sm font-semibold text-gray-800 mb-1">2. Enter Location or Use GPS</label>
+                        <input type="text" id="locationInput" class="block w-full px-4 py-2 bg-zinc-100 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="e.g., Jayanagar, Bangalore">
+                        
+                        <!-- NEW: GPS Button -->
+                        <button id="gpsButton" class="mt-2 w-full inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-geo-alt-fill mr-2" viewBox="0 0 16 16">
+                              <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
+                            </svg>
+                            Use My Current Location
+                        </button>
                     </div>
                     <div>
                         <label class="block text-sm font-semibold text-gray-800 mb-2">3. Type of Emergency</label>
@@ -77,9 +83,7 @@
 
                 <!-- Right Column: Results and Map -->
                 <div class="space-y-4">
-                    <!-- Status/Error Message Container -->
                     <div id="statusContainer" class="p-4 rounded-lg hidden font-medium"></div>
-                    <!-- Results Panel -->
                     <div id="resultPanel" class="bg-gray-50 p-5 rounded-lg border border-gray-200 space-y-3 hidden">
                         <div>
                             <h3 class="text-lg font-semibold text-gray-900">Closest Service: <span id="serviceName" class="font-bold"></span></h3>
@@ -93,7 +97,6 @@
                             <p id="callStatus" class="text-sm text-gray-600 font-mono"></p>
                         </div>
                     </div>
-                     <!-- Map Output Section -->
                     <div id="mapContainer" class="w-full h-80 bg-zinc-200 rounded-lg flex items-center justify-center text-gray-500 transition-all duration-300">
                         Map will be displayed here after processing...
                     </div>
@@ -103,95 +106,116 @@
     </div>
 
     <script>
-        // --- Get references to all the interactive HTML elements ---
         const processButton = document.getElementById('processButton');
+        const gpsButton = document.getElementById('gpsButton');
         const buttonText = document.getElementById('buttonText');
         const loader = document.getElementById('loader');
         const apiUrlInput = document.getElementById('apiUrl');
         const locationInput = document.getElementById('locationInput');
-        
         const resultPanel = document.getElementById('resultPanel');
         const serviceName = document.getElementById('serviceName');
         const routeDistance = document.getElementById('routeDistance');
         const routeTime = document.getElementById('routeTime');
         const callStatus = document.getElementById('callStatus');
-        
         const statusContainer = document.getElementById('statusContainer');
         const mapContainer = document.getElementById('mapContainer');
 
-        // --- Main function triggered on button click ---
-        processButton.addEventListener('click', async () => {
+        // Store coordinates if GPS is used
+        let currentCoordinates = null;
+
+        // --- NEW: GPS Button Event Listener ---
+        gpsButton.addEventListener('click', () => {
+            if (!navigator.geolocation) {
+                showStatus("Geolocation is not supported by your browser.", true);
+                return;
+            }
+
+            showStatus("Fetching your location...", false);
+            gpsButton.disabled = true;
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const { latitude, longitude } = position.coords;
+                    currentCoordinates = { latitude, longitude };
+                    locationInput.value = `GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+                    showStatus("Location found! You can now click 'Find & Alert'.", false);
+                    gpsButton.disabled = false;
+                },
+                () => {
+                    showStatus("Unable to retrieve your location. Please enter it manually.", true);
+                    gpsButton.disabled = false;
+                }
+            );
+        });
+        
+        // Clear GPS coordinates if user types manually
+        locationInput.addEventListener('input', () => {
+            currentCoordinates = null;
+        });
+
+        // --- Main "Find & Alert" Button Logic ---
+        processButton.addEventListener('click', () => {
             const baseApiUrl = apiUrlInput.value.trim();
-            const location = locationInput.value.trim();
+            const locationText = locationInput.value.trim();
             const emergencyType = document.querySelector('input[name="emergency"]:checked').value;
 
-            // --- 1. Validate User Input ---
-            if (!baseApiUrl || !baseApiUrl.startsWith("https://")) {
+            if (!baseApiUrl) {
                 showStatus("Error: Please paste the valid URL from your Colab notebook.", true);
                 return;
             }
-            if (!location) {
-                showStatus("Error: Please enter your location.", true);
+            if (!locationText) {
+                showStatus("Error: Please enter a location or use the GPS button.", true);
                 return;
             }
 
-            // --- 2. Set UI to Loading State ---
+            // Prepare the data payload for the backend
+            const payload = {
+                emergency_type: emergencyType,
+                // NEW: Send either coordinates or text
+                location: currentCoordinates ? currentCoordinates : { text: locationText }
+            };
+
+            // Start the process
             setLoadingState(true);
             showStatus("Contacting Colab backend... This may take a moment.", false);
             resetResults();
-
-            try {
-                // --- 3. Make the API Call to the Colab Backend ---
-                const response = await fetch(`${baseApiUrl}/find_emergency_service`, {
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        // This header helps bypass browser warnings from tunneling services
-                        'Bypass-Tunnel-Reminder': 'true'
-                    },
-                    body: JSON.stringify({ location: location, emergency_type: emergencyType }),
-                });
-
-                const data = await response.json();
-
-                // Handle errors returned from the Python script
-                if (!response.ok || data.error) {
-                    throw new Error(data.error || `HTTP error! Status: ${response.status}`);
+            
+            // Make the API call
+            fetch(`${baseApiUrl}/find_emergency_service`, {
+                method: 'POST',
+                mode: 'cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Bypass-Tunnel-Reminder': 'true'
+                },
+                body: JSON.stringify(payload),
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.error || 'Backend returned an error') });
                 }
-                
-                // --- 4. Process a Successful Response ---
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
                 displayResults(data);
-
-            } catch (error) {
-                // Handle network errors or errors from the script
+            })
+            .catch(error => {
                 console.error('An error occurred:', error);
-                // Create a more helpful error message for the user
-                const userMessage = `Connection Failed. Please check the following:
-
-1.  **Is the Colab notebook still running?** The tunnel closes when the notebook stops. You may need to re-run the cell.
-2.  **Is the URL correct?** Make sure it's copied and pasted exactly from the Colab output.
-3.  **Browser Extensions:** Try disabling ad-blockers, as they can interfere with the connection.
-
-(Technical Error: ${error.message})`;
+                const userMessage = `Connection Failed. Please check the following:\n\n1. Is the Colab notebook still running?\n2. Is the URL correct?\n3. Try disabling browser extensions.\n\n(Technical Error: ${error.message})`;
                 showStatus(userMessage, true);
-            } finally {
-                // --- 5. Always Reset the Button State ---
+            })
+            .finally(() => {
                 setLoadingState(false);
-            }
+            });
         });
-
-        // --- Helper functions to keep the code clean ---
 
         function setLoadingState(isLoading) {
             processButton.disabled = isLoading;
-            if (isLoading) {
-                buttonText.textContent = 'Processing...';
-                loader.classList.remove('hidden');
-            } else {
-                buttonText.textContent = 'Find & Alert';
-                loader.classList.add('hidden');
-            }
+            buttonText.textContent = isLoading ? 'Processing...' : 'Find & Alert';
+            loader.classList.toggle('hidden', !isLoading);
         }
 
         function showStatus(message, isError) {
@@ -201,17 +225,12 @@
         }
 
         function displayResults(data) {
-            // Inject the map HTML directly into its container
             mapContainer.innerHTML = data.map_html;
-
-            // Populate the results panel
             const info = data.route_info;
             serviceName.textContent = info.name;
             routeDistance.textContent = `Distance: ${info.distance}`;
             routeTime.textContent = `Est. Time: ${info.time}`;
             callStatus.textContent = data.call_status;
-            
-            // Make the results panel and map visible
             resultPanel.classList.remove('hidden');
             showStatus("Success! Route found and alert sent.", false);
         }
@@ -220,7 +239,6 @@
              mapContainer.innerHTML = 'Map will be displayed here after processing...';
              resultPanel.classList.add('hidden');
         }
-
     </script>
 </body>
 </html>
