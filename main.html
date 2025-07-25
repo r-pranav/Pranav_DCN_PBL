@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emergency Service Finder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f4f5; /* Zinc 100 */
+        }
+        .loader {
+            border: 4px solid #e4e4e7; /* Zinc 200 */
+            border-top: 4px solid #ef4444; /* Red 500 */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Style for the map iframe for a seamless look */
+        #mapContainer iframe {
+            border-radius: 0.5rem;
+            border: 1px solid #d4d4d8; /* Zinc 300 */
+            width: 100%;
+            height: 100%;
+        }
+        /* Make the error message pre-formatted to respect newlines */
+        #statusContainer {
+            white-space: pre-wrap;
+            text-align: left;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="w-full max-w-4xl mx-auto bg-white rounded-xl shadow-2xl shadow-zinc-300/50">
+        <!-- Header Section -->
+        <div class="bg-red-600 text-white p-6 rounded-t-xl text-center">
+            <h1 class="text-3xl font-bold">Emergency Service Finder</h1>
+            <p class="mt-1 opacity-90">Find the nearest help in Bangalore and automatically alert services.</p>
+        </div>
+
+        <div class="p-8">
+            <!-- Main Content Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- Left Column: Inputs and Controls -->
+                <div class="space-y-6">
+                    <div>
+                        <label for="apiUrl" class="block text-sm font-semibold text-gray-800 mb-1">1. Colab Backend URL</label>
+                        <input type="text" id="apiUrl" class="block w-full px-4 py-2 bg-zinc-100 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="Paste your ngrok URL here">
+                    </div>
+                    <div>
+                        <label for="locationInput" class="block text-sm font-semibold text-gray-800 mb-1">2. Your Location in Bangalore</label>
+                        <input type="text" id="locationInput" class="block w-full px-4 py-2 bg-zinc-100 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="e.g., Jayanagar or RV College">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-800 mb-2">3. Type of Emergency</label>
+                        <div id="emergencyType" class="flex flex-wrap gap-x-6 gap-y-2">
+                            <label class="inline-flex items-center cursor-pointer"><input type="radio" name="emergency" value="medical" class="form-radio h-4 w-4 text-red-600 focus:ring-red-500" checked> <span class="ml-2 text-gray-800">Medical</span></label>
+                            <label class="inline-flex items-center cursor-pointer"><input type="radio" name="emergency" value="fire" class="form-radio h-4 w-4 text-red-600 focus:ring-red-500"> <span class="ml-2 text-gray-800">Fire</span></label>
+                            <label class="inline-flex items-center cursor-pointer"><input type="radio" name="emergency" value="police" class="form-radio h-4 w-4 text-red-600 focus:ring-red-500"> <span class="ml-2 text-gray-800">Police</span></label>
+                        </div>
+                    </div>
+                     <!-- Action Button -->
+                    <div class="pt-4">
+                        <button id="processButton" class="w-full inline-flex items-center justify-center px-8 py-4 border border-transparent text-lg font-bold rounded-md shadow-lg text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-transform transform hover:scale-105">
+                            <span id="buttonText">Find & Alert</span>
+                            <div id="loader" class="loader hidden ml-3"></div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Column: Results and Map -->
+                <div class="space-y-4">
+                    <!-- Status/Error Message Container -->
+                    <div id="statusContainer" class="p-4 rounded-lg hidden font-medium"></div>
+                    <!-- Results Panel -->
+                    <div id="resultPanel" class="bg-gray-50 p-5 rounded-lg border border-gray-200 space-y-3 hidden">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">Closest Service: <span id="serviceName" class="font-bold"></span></h3>
+                        </div>
+                        <div class="text-gray-700">
+                            <p id="routeDistance"></p>
+                            <p id="routeTime"></p>
+                        </div>
+                         <div>
+                            <h3 class="text-md font-semibold text-gray-800">Twilio Status:</h3>
+                            <p id="callStatus" class="text-sm text-gray-600 font-mono"></p>
+                        </div>
+                    </div>
+                     <!-- Map Output Section -->
+                    <div id="mapContainer" class="w-full h-80 bg-zinc-200 rounded-lg flex items-center justify-center text-gray-500 transition-all duration-300">
+                        Map will be displayed here after processing...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Get references to all the interactive HTML elements ---
+        const processButton = document.getElementById('processButton');
+        const buttonText = document.getElementById('buttonText');
+        const loader = document.getElementById('loader');
+        const apiUrlInput = document.getElementById('apiUrl');
+        const locationInput = document.getElementById('locationInput');
+        
+        const resultPanel = document.getElementById('resultPanel');
+        const serviceName = document.getElementById('serviceName');
+        const routeDistance = document.getElementById('routeDistance');
+        const routeTime = document.getElementById('routeTime');
+        const callStatus = document.getElementById('callStatus');
+        
+        const statusContainer = document.getElementById('statusContainer');
+        const mapContainer = document.getElementById('mapContainer');
+
+        // --- Main function triggered on button click ---
+        processButton.addEventListener('click', async () => {
+            const baseApiUrl = apiUrlInput.value.trim();
+            const location = locationInput.value.trim();
+            const emergencyType = document.querySelector('input[name="emergency"]:checked').value;
+
+            // --- 1. Validate User Input ---
+            if (!baseApiUrl || !baseApiUrl.startsWith("https://")) {
+                showStatus("Error: Please paste the valid ngrok URL from your Colab notebook.", true);
+                return;
+            }
+            if (!location) {
+                showStatus("Error: Please enter your location.", true);
+                return;
+            }
+
+            // --- 2. Set UI to Loading State ---
+            setLoadingState(true);
+            showStatus("Contacting Colab backend... This may take a moment.", false);
+            resetResults();
+
+            try {
+                // --- 3. Make the API Call to the Colab Backend ---
+                const response = await fetch(`${baseApiUrl}/find_emergency_service`, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // This header helps bypass ngrok's browser warning page, a common cause of fetch errors.
+                        'ngrok-skip-browser-warning': 'true'
+                    },
+                    body: JSON.stringify({ location: location, emergency_type: emergencyType }),
+                });
+
+                const data = await response.json();
+
+                // Handle errors returned from the Python script
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || `HTTP error! Status: ${response.status}`);
+                }
+                
+                // --- 4. Process a Successful Response ---
+                displayResults(data);
+
+            } catch (error) {
+                // Handle network errors or errors from the script
+                console.error('An error occurred:', error);
+                // Create a more helpful error message for the user
+                const userMessage = `Connection Failed. Please check the following:
+
+1.  **Is the Colab notebook still running?** The ngrok tunnel closes when the notebook stops. You may need to re-run the cell.
+2.  **Is the ngrok URL correct?** Make sure it's copied and pasted exactly.
+3.  **Browser Extensions:** Try disabling ad-blockers, as they can interfere with the connection.
+
+(Technical Error: ${error.message})`;
+                showStatus(userMessage, true);
+            } finally {
+                // --- 5. Always Reset the Button State ---
+                setLoadingState(false);
+            }
+        });
+
+        // --- Helper functions to keep the code clean ---
+
+        function setLoadingState(isLoading) {
+            processButton.disabled = isLoading;
+            if (isLoading) {
+                buttonText.textContent = 'Processing...';
+                loader.classList.remove('hidden');
+            } else {
+                buttonText.textContent = 'Find & Alert';
+                loader.classList.add('hidden');
+            }
+        }
+
+        function showStatus(message, isError) {
+            statusContainer.textContent = message;
+            statusContainer.className = `p-4 rounded-lg font-medium ${isError ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`;
+            statusContainer.classList.remove('hidden');
+        }
+
+        function displayResults(data) {
+            // Inject the map HTML directly into its container
+            mapContainer.innerHTML = data.map_html;
+
+            // Populate the results panel
+            const info = data.route_info;
+            serviceName.textContent = info.name;
+            routeDistance.textContent = `Distance: ${info.distance}`;
+            routeTime.textContent = `Est. Time: ${info.time}`;
+            callStatus.textContent = data.call_status;
+            
+            // Make the results panel and map visible
+            resultPanel.classList.remove('hidden');
+            showStatus("Success! Route found and alert sent.", false);
+        }
+        
+        function resetResults() {
+             mapContainer.innerHTML = 'Map will be displayed here after processing...';
+             resultPanel.classList.add('hidden');
+        }
+
+    </script>
+</body>
+</html>
